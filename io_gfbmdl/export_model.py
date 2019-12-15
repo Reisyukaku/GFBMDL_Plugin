@@ -539,8 +539,6 @@ def CalculateBufferStride():
     return stride
     
 def CalculateBinormals(mesh):
-    bi = [(0.0, 0.0, 0.0)] * len(mesh.vertices)
-    return bi
     if not has_UVs[0]:
         bi = [(0.0, 0.0, 0.0)] * len(mesh.vertices)
         return bi

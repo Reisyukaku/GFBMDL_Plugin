@@ -23,6 +23,7 @@ import operator
 import numpy
 import struct
 import bmesh
+from enum import IntEnum
 
 import flatbuffers
 from .Gfbmdl.Model import Model
@@ -33,21 +34,28 @@ from .Gfbmdl.MeshAttribute import MeshAttribute
 from .Gfbmdl.MeshPolygon import MeshPolygon
 from .Gfbmdl.Bone import Bone
 
+class BufferFormat(IntEnum):
+    Float = 0
+    HalfFloat = 1
+    Byte = 3
+    Short = 5
+    BytesAsFloat = 8
+
 # #####################################################
 # Utils
 # #####################################################
 
 def CalcStride(type, cnt):
     ret = 0
-    if type == 0: #float
+    if type == BufferFormat.Float:
         ret = 4 * cnt
-    if type == 1: #halffloat
+    if type == BufferFormat.HalfFloat:
         ret = 2 * cnt
-    if type == 3: #byte
+    if type == BufferFormat.Byte:
         ret = cnt
-    if type == 5: #short
+    if type == BufferFormat.Short:
         ret = 2 * cnt
-    if type == 8: #byteAsFloat
+    if type == BufferFormat.BytesAsFloat:
         ret = 1 * cnt
     return ret
 
@@ -68,13 +76,13 @@ def LoadModel(buf):
         # Get mesh
         mesh = mon.Meshes(i)
         
-        alignType = []
+        attribType = []
         alignStride = []
         totalStride = 0
         for t in range(mesh.AttributesLength()):
             attrib = mesh.Attributes(t)
-            alignType.append(attrib.TypeID())
-            stride = int(CalcStride(attrib.FormatID(), attrib.ElementCount()))
+            attribType.append(attrib.VertexType())
+            stride = int(CalcStride(attrib.BufferFormat(), attrib.ElementCount()))
             alignStride.append(stride)
             totalStride += stride
         
@@ -144,7 +152,7 @@ def LoadModel(buf):
     for i in range(boneLen):
         bone = mon.Bones(i)
         bname = bone.Name().decode("utf-8")
-        btype = bone.Type()
+        btype = bone.BoneType()
         transVec = bone.Translation()
         rotVec = bone.Rotation()
         parent = bone.Parent()
