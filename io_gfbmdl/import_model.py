@@ -15,24 +15,39 @@
 import bpy
 import mathutils
 from mathutils import Matrix, Euler, Vector
+from math import radians
 
 import os
 import os.path
+import sys
 import math
 import operator
 import numpy
 import struct
 import bmesh
 from enum import IntEnum
+sys.path.append(os.path.join(os.path.dirname(__file__), '.'))
 
 import flatbuffers
-from .Gfbmdl.Model import Model
-from .Gfbmdl.BoundingBox import BoundingBox
-from .Gfbmdl.Material import Material
-from .Gfbmdl.Mesh import Mesh
-from .Gfbmdl.MeshAttribute import MeshAttribute
-from .Gfbmdl.MeshPolygon import MeshPolygon
-from .Gfbmdl.Bone import Bone
+import Gfbmdl.Bone
+import Gfbmdl.BoneRigidData
+import Gfbmdl.BoundingBox
+import Gfbmdl.Model
+import Gfbmdl.Material
+import Gfbmdl.Mesh
+import Gfbmdl.MeshAttribute
+import Gfbmdl.MeshPolygon
+import Gfbmdl.Group
+import Gfbmdl.MaterialCommon
+import Gfbmdl.MatFloat
+import Gfbmdl.MatInt
+import Gfbmdl.MatSwitch
+import Gfbmdl.MatColor
+import Gfbmdl.ColorRGB32
+import Gfbmdl.TextureMap
+import Gfbmdl.TextureMapping
+import Gfbmdl.CollisionGroup
+import Gfbmdl.Vector3
 
 class BufferFormat(IntEnum):
     Float = 0
@@ -44,7 +59,6 @@ class BufferFormat(IntEnum):
 # #####################################################
 # Utils
 # #####################################################
-
 def CalcStride(type, cnt):
     ret = 0
     if type == BufferFormat.Float:
@@ -59,6 +73,19 @@ def CalcStride(type, cnt):
         ret = 1 * cnt
     return ret
     
+def RotateObj(obj, angle, axis):
+    rot_mat = Matrix.Rotation(radians(angle), 4, axis)
+
+    orig_loc, orig_rot, orig_scale = obj.matrix_world.decompose()
+    orig_loc_mat = Matrix.Translation(orig_loc)
+    orig_rot_mat = orig_rot.to_matrix().to_4x4()
+    orig_scale_mat = Matrix.Scale(orig_scale[0],4,(1,0,0)) @ Matrix.Scale(orig_scale[1],4,(0,1,0)) @ Matrix.Scale(orig_scale[2],4,(0,0,1))
+
+    obj.matrix_world = orig_loc_mat @ rot_mat @ orig_rot_mat @ orig_scale_mat 
+    
+# #####################################################
+# Model
+# #####################################################
 def BuildArmature(mon):
     armature = bpy.data.armatures.new("Armature")
     obj = bpy.data.objects.new(armature.name, armature)            
@@ -173,7 +200,7 @@ def CreateMesh(ind, mesh, mats):
         obj.data.materials.append(mt)
         
 def LoadModel(buf):
-    mon = Model.GetRootAsModel(buf, 0)
+    mon = Gfbmdl.Model.Model.GetRootAsModel(buf, 0)
     
     # Create armature
     BuildArmature(mon)
@@ -187,6 +214,11 @@ def LoadModel(buf):
     # Create meshes
     for i in range(mon.MeshesLength()):
         CreateMesh(i, mon.Meshes(i), mats)
+
+    # Orient properly
+    obj = [o for o in bpy.context.scene.objects if o.type == 'MESH' or o.type == 'ARMATURE']
+    for o in obj:
+        RotateObj(o, 90, 'X')
     
 # #####################################################
 # Main

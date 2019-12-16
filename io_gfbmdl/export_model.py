@@ -14,6 +14,8 @@
 
 import bpy
 import mathutils
+from mathutils import Matrix, Euler, Vector
+from math import radians
 
 import os
 import sys
@@ -288,6 +290,16 @@ def bounds(obj, local=False):
 
     o_details = collections.namedtuple('object_details', 'x y z')
     return o_details(**originals)
+    
+def RotateObj(obj, angle, axis):
+    rot_mat = Matrix.Rotation(radians(angle), 4, axis)
+
+    orig_loc, orig_rot, orig_scale = obj.matrix_world.decompose()
+    orig_loc_mat = Matrix.Translation(orig_loc)
+    orig_rot_mat = orig_rot.to_matrix().to_4x4()
+    orig_scale_mat = Matrix.Scale(orig_scale[0],4,(1,0,0)) @ Matrix.Scale(orig_scale[1],4,(0,1,0)) @ Matrix.Scale(orig_scale[2],4,(0,0,1))
+
+    obj.matrix_world = orig_loc_mat @ rot_mat @ orig_rot_mat @ orig_scale_mat
     
 def GenerateWeightsAndIndices(mesh):
     boneid = [0] * len(mesh.vertices)
@@ -856,38 +868,50 @@ def CreateBones(builder):
 def CreateCollisionData(builder):
     Gfbmdl.Model.ModelStartCollisionGroupsVector(builder, 0)
     return builder.EndVector(0)
-
-def get_model_string( ctxt ):    
-    builder = flatbuffers.Builder(0)
-    details = bounds(([x for x in bpy.data.objects if x.type == 'ARMATURE'])[0])
-    
-    texNames = CreateTexNames(builder)
-    shdrNames = CreateShaderNames(builder)
-    unk = CreateUnknown(builder)
-    matNames = CreateMatNames(builder)
-    mats = CreateMaterials(builder)
-    group = CreateGroups(builder)
-    mesh = CreateMeshes(builder)
-    bones = CreateBones(builder)
-    colData = CreateCollisionData(builder)
-    
-    # Build Model
-    debug("Creating model object.")
-    Gfbmdl.Model.ModelStart(builder)
-    Gfbmdl.Model.ModelAddVersion(builder, 403704096)
-    Gfbmdl.Model.ModelAddBounding(builder, CreateBoundBox(builder, details.x.min, details.y.min, details.z.min, details.x.max, details.y.max, details.z.max))
-    Gfbmdl.Model.ModelAddTextureNames(builder, texNames)
-    Gfbmdl.Model.ModelAddShaderNames(builder, shdrNames)
-    Gfbmdl.Model.ModelAddUnknown(builder, unk)
-    Gfbmdl.Model.ModelAddMaterialNames(builder, matNames)
-    Gfbmdl.Model.ModelAddMaterials(builder, mats)
-    Gfbmdl.Model.ModelAddGroups(builder, group)
-    Gfbmdl.Model.ModelAddMeshes(builder, mesh)
-    Gfbmdl.Model.ModelAddBones(builder, bones)
-    Gfbmdl.Model.ModelAddCollisionGroups(builder, colData)
-    model = Gfbmdl.Model.ModelEnd(builder)
-    
-    builder.Finish(model)
+        
+def get_model_string( ctxt ):
+    # Orient properly
+    obj = [o for o in bpy.context.scene.objects if o.type == 'MESH' or o.type == 'ARMATURE']
+    for o in obj:
+        RotateObj(o, -90, 'X')
+        
+    try:
+        builder = flatbuffers.Builder(0)
+        details = bounds(([x for x in bpy.data.objects if x.type == 'ARMATURE'])[0])
+        
+        texNames = CreateTexNames(builder)
+        shdrNames = CreateShaderNames(builder)
+        unk = CreateUnknown(builder)
+        matNames = CreateMatNames(builder)
+        mats = CreateMaterials(builder)
+        group = CreateGroups(builder)
+        mesh = CreateMeshes(builder)
+        bones = CreateBones(builder)
+        colData = CreateCollisionData(builder)
+        
+        # Build Model
+        debug("Creating model object.")
+        Gfbmdl.Model.ModelStart(builder)
+        Gfbmdl.Model.ModelAddVersion(builder, 403704096)
+        Gfbmdl.Model.ModelAddBounding(builder, CreateBoundBox(builder, details.x.min, details.y.min, details.z.min, details.x.max, details.y.max, details.z.max))
+        Gfbmdl.Model.ModelAddTextureNames(builder, texNames)
+        Gfbmdl.Model.ModelAddShaderNames(builder, shdrNames)
+        Gfbmdl.Model.ModelAddUnknown(builder, unk)
+        Gfbmdl.Model.ModelAddMaterialNames(builder, matNames)
+        Gfbmdl.Model.ModelAddMaterials(builder, mats)
+        Gfbmdl.Model.ModelAddGroups(builder, group)
+        Gfbmdl.Model.ModelAddMeshes(builder, mesh)
+        Gfbmdl.Model.ModelAddBones(builder, bones)
+        Gfbmdl.Model.ModelAddCollisionGroups(builder, colData)
+        model = Gfbmdl.Model.ModelEnd(builder)
+        
+        builder.Finish(model)
+        
+    finally:
+        # Orient back to normal
+        obj = [o for o in bpy.context.scene.objects if o.type == 'MESH' or o.type == 'ARMATURE']
+        for o in obj:
+            RotateObj(o, 90, 'X')
     
     return builder.Bytes, builder.Head()
 
