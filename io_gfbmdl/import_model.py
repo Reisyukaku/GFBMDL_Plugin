@@ -58,88 +58,8 @@ def CalcStride(type, cnt):
     if type == BufferFormat.BytesAsFloat:
         ret = 1 * cnt
     return ret
-
-def LoadModel(buf):
-    mon = Model.GetRootAsModel(buf, 0)
     
-    # Add materials
-    mats = []
-    matLen = mon.MaterialsLength()
-    for i in range(matLen):
-        mat = bpy.data.materials.new(name=mon.Materials(i).Name().decode("utf-8"))
-        mat.use_nodes = True
-        mats.append(mat)
-    
-    # Add meshes
-    meshLen = mon.MeshesLength()
-    for i in range(meshLen):
-        # Get mesh
-        mesh = mon.Meshes(i)
-        
-        attribType = []
-        alignStride = []
-        totalStride = 0
-        for t in range(mesh.AttributesLength()):
-            attrib = mesh.Attributes(t)
-            attribType.append(attrib.VertexType())
-            stride = int(CalcStride(attrib.BufferFormat(), attrib.ElementCount()))
-            alignStride.append(stride)
-            totalStride += stride
-        
-
-        rawData = mesh.DataAsNumpy()
-        print("Total bytes (mesh %d): %d" % (i, len(rawData)))
-        print("Total stride (mesh %d): %d" % (i, totalStride))
-        
-        nmesh = bpy.data.meshes.new("Mesh_%d" % i)
-        
-        # Create new bmesh
-        bm = bmesh.new()
-        bm.from_mesh(nmesh)
-        
-        # Parse raw buffer
-        uv_map = []
-        vc = bm.loops.layers.color.new("color")
-        for v in range(int(len(rawData)/totalStride)):
-            baseOff = int(v*totalStride)
-            [posx,posy,posz] = struct.unpack_from('3f', rawData, baseOff)
-            [normx,normy,normz,normw] = struct.unpack_from('4e', rawData, baseOff+12)
-            [bnormx,bnormy,bnormz,bnormw] = struct.unpack_from('4e', rawData, baseOff+20)
-            [u_coord, v_coord] = struct.unpack_from('2f', rawData, baseOff+28)
-            [rgba1, rgba2] = struct.unpack_from('4p4p', rawData, baseOff+36)
-            [boneId, boneWeight] = struct.unpack_from('If', rawData, baseOff+44)
-            vert = bm.verts.new((posx,posy,posz))
-            vert.normal = ((normx,normy,normz))
-            uv_map.append((u_coord,v_coord))
-            #vc.data[v].color = (rgba1[0] / 255, rgba1[1] / 255, rgba1[2] / 255, rgba1[3] / 255)
-            bm.verts.index_update()
-        
-        # Set faces and cooresponding material ids
-        for poly in range(mesh.PolygonsLength()):
-            polygon = mesh.Polygons(poly)
-            matIdx = polygon.MaterialIndex()
-            pdata = polygon.FacesAsNumpy()
-            bm.verts.ensure_lookup_table()
-            d=0
-            bm.faces.ensure_lookup_table()
-            while d < int(len(pdata)-2):
-                face = bm.faces.new((bm.verts[pdata[d]], bm.verts[pdata[d+1]], bm.verts[pdata[d+2]]))
-                face.material_index = matIdx
-                face.normal_update()
-                d+=3
-            
-        # Assign bmesh to new created mesh and link to scene
-        bm.to_mesh(nmesh)
-        bm.free()
-        obj = bpy.data.objects.new(nmesh.name, nmesh)            
-        bpy.context.collection.objects.link(obj)
-
-        
-        # Assign all materials to each mesh (maybe do this smarter later?)
-        for mt in mats:
-            obj.data.materials.append(mt)
-            
-    # Add skeleton
+def BuildArmature(mon):
     armature = bpy.data.armatures.new("Armature")
     obj = bpy.data.objects.new(armature.name, armature)            
     bpy.context.collection.objects.link(obj)
@@ -175,7 +95,99 @@ def LoadModel(buf):
     bpy.ops.object.mode_set(mode='OBJECT')
     bpy.ops.object.select_all(action='DESELECT')
     print("Bone count: %d" % len(armature.bones))
-     
+
+def CreateMaterial(material):
+    mat = bpy.data.materials.new(name=material.Name().decode("utf-8"))
+    mat.use_nodes = True
+    return mat
+
+def CreateMesh(ind, mesh, mats):        
+    attribType = []
+    alignStride = []
+    totalStride = 0
+    for t in range(mesh.AttributesLength()):
+        attrib = mesh.Attributes(t)
+        attribType.append(attrib.VertexType())
+        stride = int(CalcStride(attrib.BufferFormat(), attrib.ElementCount()))
+        alignStride.append(stride)
+        totalStride += stride
+    
+
+    rawData = mesh.DataAsNumpy()
+    print("Total bytes (mesh %d): %d" % (ind, len(rawData)))
+    print("Total stride (mesh %d): %d" % (ind, totalStride))
+    
+    nmesh = bpy.data.meshes.new("Mesh_%d" % ind)
+    
+    # Create new bmesh
+    bm = bmesh.new()
+    bm.from_mesh(nmesh)
+    
+    # Parse raw buffer
+    uv_map = []
+    cols = []
+    vc = bm.loops.layers.color.new("color")
+    for v in range(int(len(rawData)/totalStride)):
+        baseOff = int(v*totalStride)
+        [posx,posy,posz] = struct.unpack_from('3f', rawData, baseOff)
+        [normx,normy,normz,normw] = struct.unpack_from('4e', rawData, baseOff+12)
+        [bnormx,bnormy,bnormz,bnormw] = struct.unpack_from('4e', rawData, baseOff+20)
+        [u_coord, v_coord] = struct.unpack_from('2f', rawData, baseOff+28)
+        [r1, g1, b1, a1, r2, g2, b2, a2] = struct.unpack_from('4B4B', rawData, baseOff+36)
+        [boneId, boneWeight] = struct.unpack_from('If', rawData, baseOff+44)
+        vert = bm.verts.new((posx,posy,posz))
+        vert.normal = ((normx,normy,normz))
+        uv_map.append((u_coord,v_coord))
+        cols.append((r1/255.0, g1/255.0, b1/255.0, a1/255.0))
+        bm.verts.index_update()
+    
+    # Iterate through polygons
+    for poly in range(mesh.PolygonsLength()):
+        polygon = mesh.Polygons(poly)
+        matIdx = polygon.MaterialIndex()
+        pdata = polygon.FacesAsNumpy()
+        bm.verts.ensure_lookup_table()
+        d=0
+        bm.faces.ensure_lookup_table()
+        # Set faces and cooresponding material ids
+        while d < int(len(pdata)-2):
+            face = bm.faces.new((bm.verts[pdata[d]], bm.verts[pdata[d+1]], bm.verts[pdata[d+2]]))
+            face.material_index = matIdx
+            face.normal_update()
+            d+=3
+            
+        # Set vertex colors
+        for face in bm.faces:
+            for loop in face.loops:
+                loop[vc] = cols[loop.vert.index]
+        
+    # Assign bmesh to new created mesh and link to scene
+    bm.to_mesh(nmesh)
+    bm.free()
+    obj = bpy.data.objects.new(nmesh.name, nmesh)            
+    bpy.context.collection.objects.link(obj)
+
+    
+    # Assign all materials to each mesh (maybe do this smarter later?)
+    for mt in mats:
+        obj.data.materials.append(mt)
+        
+def LoadModel(buf):
+    mon = Model.GetRootAsModel(buf, 0)
+    
+    # Create armature
+    BuildArmature(mon)
+    
+    # Create materials
+    mats = []
+    matLen = mon.MaterialsLength()
+    for i in range(matLen):
+        mats.append(CreateMaterial(mon.Materials(i)))
+    
+    # Create meshes
+    for i in range(mon.MeshesLength()):
+        CreateMesh(i, mon.Meshes(i), mats)
+    
 # #####################################################
 # Main
 # #####################################################
