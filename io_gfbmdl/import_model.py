@@ -55,6 +55,11 @@ class BufferFormat(IntEnum):
     Byte = 3
     Short = 5
     BytesAsFloat = 8
+    
+class WrapMode(IntEnum):
+    Repeat = 0
+    Clamp = 1
+    Mirror = 2
 
 # #####################################################
 # Utils
@@ -94,6 +99,7 @@ def BuildArmature(mon):
     bpy.context.view_layer.objects.active = obj
     
     boneLen = mon.BonesLength()
+    print("Total bones: %d" % boneLen)
     bpy.ops.object.mode_set(mode='EDIT')
     global_matrix = (Matrix.Scale(1, 4))
     for i in range(boneLen):
@@ -113,25 +119,21 @@ def BuildArmature(mon):
         else:
             eb.tail = (0,0,1)
             eb.matrix = global_matrix
-        #eb.use_connect = True
-        
-        print(eb.head)
-        print(eb.tail)
-        print("-----")
+        eb.use_connect = True
         
     bpy.ops.object.mode_set(mode='OBJECT')
     bpy.ops.object.select_all(action='DESELECT')
-    print("Bone count: %d" % len(armature.bones))
 
 def CreateMaterial(material):
     mat = bpy.data.materials.new(name=material.Name().decode("utf-8"))
     mat.use_nodes = True
     return mat
 
-def CreateMesh(ind, mesh, mats):        
+def CreateMesh(name, mon, ind, mats):        
     attribType = []
     alignStride = []
     totalStride = 0
+    mesh = mon.Meshes(ind)
     for t in range(mesh.AttributesLength()):
         attrib = mesh.Attributes(t)
         attribType.append(attrib.VertexType())
@@ -141,10 +143,10 @@ def CreateMesh(ind, mesh, mats):
     
 
     rawData = mesh.DataAsNumpy()
-    print("Total bytes (mesh %d): %d" % (ind, len(rawData)))
-    print("Total stride (mesh %d): %d" % (ind, totalStride))
+    print("Total bytes (%s): %d" % (name, len(rawData)))
+    print("Total stride (%s): %d" % (name, totalStride))
     
-    nmesh = bpy.data.meshes.new("Mesh_%d" % ind)
+    nmesh = bpy.data.meshes.new(name)
     
     # Create new bmesh
     bm = bmesh.new()
@@ -154,6 +156,7 @@ def CreateMesh(ind, mesh, mats):
     uv_map = []
     cols = []
     vc = bm.loops.layers.color.new("color")
+    uv = bm.loops.layers.uv.new("UVMap")
     for v in range(int(len(rawData)/totalStride)):
         baseOff = int(v*totalStride)
         [posx,posy,posz] = struct.unpack_from('3f', rawData, baseOff)
@@ -174,6 +177,7 @@ def CreateMesh(ind, mesh, mats):
         matIdx = polygon.MaterialIndex()
         pdata = polygon.FacesAsNumpy()
         bm.verts.ensure_lookup_table()
+        mat = mon.Materials(matIdx)
         d=0
         bm.faces.ensure_lookup_table()
         # Set faces and cooresponding material ids
@@ -183,10 +187,12 @@ def CreateMesh(ind, mesh, mats):
             face.normal_update()
             d+=3
             
-        # Set vertex colors
+        # Set vertex colors and uvs
         for face in bm.faces:
             for loop in face.loops:
                 loop[vc] = cols[loop.vert.index]
+                loop[uv].uv[0] = uv_map[loop.vert.index][0] * (2 if mat.TextureMaps(0).Params().WrapModeX() == WrapMode.Mirror else 1)
+                loop[uv].uv[1] = uv_map[loop.vert.index][1] * (2 if mat.TextureMaps(0).Params().WrapModeY() == WrapMode.Mirror else 1)
         
     # Assign bmesh to new created mesh and link to scene
     bm.to_mesh(nmesh)
@@ -212,8 +218,9 @@ def LoadModel(buf):
         mats.append(CreateMaterial(mon.Materials(i)))
     
     # Create meshes
+    totBones = len(bpy.data.armatures[0].bones)
     for i in range(mon.MeshesLength()):
-        CreateMesh(i, mon.Meshes(i), mats)
+        CreateMesh(bpy.data.armatures[0].bones[i + (totBones - mon.MeshesLength())].name, mon, i, mats)
 
     # Orient properly
     obj = [o for o in bpy.context.scene.objects if o.type == 'MESH' or o.type == 'ARMATURE']

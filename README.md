@@ -5,9 +5,9 @@
 
 **Installation:**
 
-Put flatbuffer folder found [HERE](https://drive.google.com/file/d/1kl2ojAgGho2BtP7DLTHKcntW7GAqI2QI/view?usp=sharing) in <Blender install dir>/Blender/<version>/python/lib/site-packages.
+Put flatbuffer folder found [HERE](https://drive.google.com/file/d/1kl2ojAgGho2BtP7DLTHKcntW7GAqI2QI/view?usp=sharing) in &lt;Blender install dir&gt;/Blender/&lt;version&gt;/python/lib/site-packages.
 
-Put contents of this repo in %appdata%/Blender Foundation/Blender/<version>/scripts/addons on Windows
+Put contents of this repo in %appdata%/Blender Foundation/Blender/&lt;version&gt;/scripts/addons on Windows
 
 **Contributing:**
 
