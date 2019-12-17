@@ -60,6 +60,10 @@ class WrapMode(IntEnum):
     Repeat = 0
     Clamp = 1
     Mirror = 2
+    
+class BoneType(IntEnum):
+    NoSkinning = 0
+    HasSkinning = 1
 
 # #####################################################
 # Utils
@@ -112,6 +116,9 @@ def BuildArmature(mon):
         vis = bone.Visible()
         eb = armature.edit_bones.new(bname)
         eb.head = (transVec.X(),transVec.Y(),transVec.Z())
+        eb.use_inherit_rotation = True
+        if btype == BoneType.HasSkinning:
+            eb.use_deform = True
         if parent >= 0:
             eb.parent = bpy.data.armatures[armature.name].edit_bones[parent]
             eb.tail = eb.parent.head
@@ -127,6 +134,20 @@ def BuildArmature(mon):
 def CreateMaterial(material):
     mat = bpy.data.materials.new(name=material.Name().decode("utf-8"))
     mat.use_nodes = True
+    nodes = mat.node_tree.nodes
+    links = mat.node_tree.links
+    shdr = nodes.get('Principled BSDF')
+    out = nodes.get('Material Output')
+    img = nodes.new('ShaderNodeTexImage')
+    att = nodes.new('ShaderNodeAttribute')
+    mix = nodes.new('ShaderNodeMixRGB')
+    img.location = (-450, 350)
+    att.location = (-450, 165)
+    mix.location = (-160, 160)
+    att.attribute_name = "Colors"
+    links.new(att.outputs[0], mix.inputs[1]) # vert cols -> mix
+    links.new(img.outputs[0], mix.inputs[2]) # img cols -> mix
+    links.new(mix.outputs[0], shdr.inputs[0]) # mix -> shader
     return mat
 
 def CreateMesh(name, mon, ind, mats):        
@@ -155,7 +176,7 @@ def CreateMesh(name, mon, ind, mats):
     # Parse raw buffer
     uv_map = []
     cols = []
-    vc = bm.loops.layers.color.new("color")
+    vc = bm.loops.layers.color.new("Color")
     uv = bm.loops.layers.uv.new("UVMap")
     for v in range(int(len(rawData)/totalStride)):
         baseOff = int(v*totalStride)
@@ -188,18 +209,18 @@ def CreateMesh(name, mon, ind, mats):
             d+=3
             
         # Set vertex colors and uvs
+        params = mat.TextureMaps(0).Params()
         for face in bm.faces:
             for loop in face.loops:
                 loop[vc] = cols[loop.vert.index]
-                loop[uv].uv[0] = uv_map[loop.vert.index][0] * (2 if mat.TextureMaps(0).Params().WrapModeX() == WrapMode.Mirror else 1)
-                loop[uv].uv[1] = uv_map[loop.vert.index][1] * (2 if mat.TextureMaps(0).Params().WrapModeY() == WrapMode.Mirror else 1)
+                loop[uv].uv[0] = uv_map[loop.vert.index][0] * (2 if params.WrapModeX() == WrapMode.Mirror else 1)
+                loop[uv].uv[1] = uv_map[loop.vert.index][1] * (2 if params.WrapModeY() == WrapMode.Mirror else 1)
         
     # Assign bmesh to new created mesh and link to scene
     bm.to_mesh(nmesh)
     bm.free()
     obj = bpy.data.objects.new(nmesh.name, nmesh)            
     bpy.context.collection.objects.link(obj)
-
     
     # Assign all materials to each mesh (maybe do this smarter later?)
     for mt in mats:
@@ -218,9 +239,8 @@ def LoadModel(buf):
         mats.append(CreateMaterial(mon.Materials(i)))
     
     # Create meshes
-    totBones = len(bpy.data.armatures[0].bones)
     for i in range(mon.MeshesLength()):
-        CreateMesh(bpy.data.armatures[0].bones[i + (totBones - mon.MeshesLength())].name, mon, i, mats)
+        CreateMesh(bpy.data.armatures[0].bones[mon.Groups(i).BoneIndex()].name, mon, i, mats) #TODO: dont assume groups are in order by matIndex
 
     # Orient properly
     obj = [o for o in bpy.context.scene.objects if o.type == 'MESH' or o.type == 'ARMATURE']
