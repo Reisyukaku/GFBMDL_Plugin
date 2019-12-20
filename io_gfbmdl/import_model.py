@@ -82,6 +82,12 @@ def CalcStride(type, cnt):
         ret = 1 * cnt
     return ret
     
+def GetMatValue(mat, param):
+    for v in range(mat.ValuesLength()):
+        if mat.Values(v).Name().decode('utf-8') == param:
+            return mat.Values(v).Value()
+    return None
+    
 def RotateObj(obj, angle, axis):
     rot_mat = Matrix.Rotation(radians(angle), 4, axis)
 
@@ -176,8 +182,11 @@ def CreateMesh(name, mon, ind, mats):
     # Parse raw buffer
     uv_map = []
     cols = []
+    bids = []
+    weights = []
     vc = bm.loops.layers.color.new("Color")
     uv = bm.loops.layers.uv.new("UVMap")
+    boneCnt = len(bpy.data.armatures[0].bones)
     for v in range(int(len(rawData)/totalStride)):
         baseOff = int(v*totalStride)
         [posx,posy,posz] = struct.unpack_from('3f', rawData, baseOff)
@@ -185,11 +194,13 @@ def CreateMesh(name, mon, ind, mats):
         [bnormx,bnormy,bnormz,bnormw] = struct.unpack_from('4e', rawData, baseOff+20)
         [u_coord, v_coord] = struct.unpack_from('2f', rawData, baseOff+28)
         [r1, g1, b1, a1, r2, g2, b2, a2] = struct.unpack_from('4B4B', rawData, baseOff+36)
-        [boneId, boneWeight] = struct.unpack_from('If', rawData, baseOff+44)
+        [boneId0, boneId1, boneId2, boneId3, boneWeight] = struct.unpack_from('4Bf', rawData, baseOff+44)
         vert = bm.verts.new((posx,posy,posz))
         vert.normal = ((normx,normy,normz))
         uv_map.append((u_coord,v_coord))
         cols.append((r1/255.0, g1/255.0, b1/255.0, a1/255.0))
+        bids.append((boneId0, boneId1, boneId2, boneId3))
+        weights.append(boneWeight)
         bm.verts.index_update()
     
     # Iterate through polygons
@@ -209,18 +220,27 @@ def CreateMesh(name, mon, ind, mats):
             d+=3
             
         # Set vertex colors and uvs
-        params = mat.TextureMaps(0).Params()
         for face in bm.faces:
             for loop in face.loops:
                 loop[vc] = cols[loop.vert.index]
-                loop[uv].uv[0] = uv_map[loop.vert.index][0] * (2 if params.WrapModeX() == WrapMode.Mirror else 1)
-                loop[uv].uv[1] = uv_map[loop.vert.index][1] * (2 if params.WrapModeY() == WrapMode.Mirror else 1)
-        
-    # Assign bmesh to new created mesh and link to scene
+                loop[uv].uv[0] = uv_map[loop.vert.index][0] * GetMatValue(mat, "ColorUVScaleU")
+                loop[uv].uv[1] = uv_map[loop.vert.index][1] * GetMatValue(mat, "ColorUVScaleV")
+          
+    # Assign bmesh to new created mesh
     bm.to_mesh(nmesh)
     bm.free()
-    obj = bpy.data.objects.new(nmesh.name, nmesh)            
+    
+    # Link mesh to object in scene
+    obj = bpy.data.objects.new(nmesh.name, nmesh)
     bpy.context.collection.objects.link(obj)
+    
+    # Set vertex groups
+    for b in bpy.data.armatures[0].bones:
+        # Get or create v-group
+        vg = obj.vertex_groups.get(b.name)
+        if vg is None: 
+            vg = obj.vertex_groups.new(name=b.name)
+        #vg.add(tmp, 1.0, 'ADD')
     
     # Assign all materials to each mesh (maybe do this smarter later?)
     for mt in mats:
